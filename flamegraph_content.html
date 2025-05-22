@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Flame Graph Visualization</title>
+    <!-- Include d3 libraries -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-flame-graph@4.1.3/dist/d3-flamegraph.min.js"></script>
+    <!-- Include d3 color schemes -->
+    <script src="https://d3js.org/d3-scale-chromatic.v3.min.js"></script>
+    <!-- Include Looker Studio DSCC helper library -->
+    <!-- Recommendation: Use CDN URL for dscc.min.js -->
+    <script src="https://storage.googleapis.com/looker-studio-developer/dscc/stable/dscc.min.js"></script>
+
+    <!-- d3-flame-graph CSS -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/d3-flame-graph@4.1.3/dist/d3-flamegraph.css">
+
+    <style>
+        /* ... (styles remain the same) ... */
+        html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; }
+        #chart-container { width: 100%; height: 100%; box-sizing: border-box; }
+        .error-message { font-family: Arial, sans-serif; color: red; padding: 20px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="chart-container"></div>
+
+    <script>
+        // Debounce function (remains the same)
+        function debounce(func, wait, immediate) { /* ... */ }
+
+        // --- NEW: Helper function for formatting values (Example: Bytes) ---
+        // Note: This is a basic example. A robust solution might need the actual unit
+        // information passed from the BigQuery UDF.
+        function formatValue(value, unitHint = 'bytes') {
+            if (typeof value !== 'number' || isNaN(value)) {
+                return 'N/A';
+            }
+            // Basic byte formatting example
+            if (unitHint.toLowerCase().includes('bytes')) {
+                if (value === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KiB', 'MiB', 'GiB', 'TiB'];
+                const i = Math.floor(Math.log(value) / Math.log(k));
+                return parseFloat((value / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+            }
+            // Add other unit formatting (e.g., time) as needed
+            // Fallback to generic number formatting
+            return value.toLocaleString(); // Simple number format
+        }
+
+
+        // Main drawing function
+        function drawViz(data) {
+            const chartContainer = d3.select("#chart-container");
+            chartContainer.html(''); // Clear previous contents
+
+            // --- 1. Data Validation ---
+            if (!data || !data.tables || !data.tables.DEFAULT || data.tables.DEFAULT.length === 0) {
+                displayError("No data received from Looker Studio."); return;
+            }
+            const tableData = data.tables.DEFAULT;
+            if (!tableData[0] || !tableData[0].jsonOutput || tableData[0].jsonOutput.length === 0 || !tableData[0].jsonOutput[0]) {
+                 displayError("Data received, but the required 'jsonOutput' field is missing or empty..."); return;
+            }
+            const flameGraphJsonString = tableData[0].jsonOutput[0];
+            let profileData;
+
+            // --- 2. Parse JSON ---
+            try {
+                profileData = JSON.parse(flameGraphJsonString);
+                 // Basic structure check
+                if (!profileData || typeof profileData !== 'object' || typeof profileData.name !== 'string' || typeof profileData.value === 'undefined' || !profileData.children) {
+                     throw new Error("Parsed data does not match expected flame graph structure ({name, value, children})...");
+                }
+                console.log("Successfully parsed JSON data.");
+            } catch (e) {
+                displayError(`Failed to parse JSON data: ${e.message}...`);
+                console.error("Invalid JSON string:", flameGraphJsonString); return;
+            }
+
+            // --- 3. Get Style Settings ---
+            const style = data.style;
+            const colorSchemeName = style.colorScheme.value || "Viridis";
+            const fontSize = style.fontSize.value || 12;
+
+            // --- 4. Setup Flame Graph ---
+            const colorSchemes = { /* ... (color schemes remain the same) ... */ };
+            const colorInterpolator = colorSchemes[colorSchemeName] || d3.interpolateViridis;
+            function simpleHash(str) { /* ... (hash function remains the same) ... */ }
+            const colorMapper = (d) => { /* ... (color mapper remains the same) ... */ };
+
+            const containerNode = chartContainer.node();
+            const width = containerNode.getBoundingClientRect().width;
+
+            // *** NEW: Capture Root Value ***
+            const rootValue = profileData.value || 0;
+            // *** NEW: Attempt to guess unit from root name for formatting ***
+            // This is fragile; ideally, the UDF provides the unit separately.
+            let unitHint = 'unknown';
+            if (profileData.name) {
+                const match = profileData.name.match(/\(([^)]+)\s*-\s*averaged/);
+                if (match && match[1]) {
+                    unitHint = match[1].trim().toLowerCase(); // e.g., "bytes", "nanoseconds"
+                } else if (profileData.name.toLowerCase().includes('bytes')) {
+                    unitHint = 'bytes';
+                } else if (profileData.name.toLowerCase().includes('nanoseconds')) {
+                     unitHint = 'nanoseconds'; // Add more unit hints if needed
+                }
+            }
+
+
+            // Create flamegraph instance
+            const flameGraph = flamegraph()
+                .width(width)
+                .cellHeight(18)
+                .transitionDuration(350)
+                .minFrameSize(1)
+                .sort(true)
+                .setColorMapper(colorMapper)
+                .label(d => d.data.name) // Label inside the frame
+
+                // *** NEW: Configure Tooltip Title ***
+                .title(d => {
+                    const name = d.data.name || "[no name]";
+                    const value = d.data.value;
+                    let percentage = 0;
+                    // Prevent division by zero
+                    if (rootValue > 0) {
+                        percentage = (value / rootValue) * 100;
+                    }
+
+                    // Format the tooltip string (\n creates newlines in standard tooltips)
+                    return `${name}\n` +
+                           `Value: ${formatValue(value, unitHint)}\n` +
+                           `Percentage: ${percentage.toFixed(1)}%`;
+                });
+
+            // Apply font size
+            chartContainer.style("font-size", `${fontSize}px`);
+
+            // --- 5. Render Graph ---
+            chartContainer
+                .datum(profileData)
+                .call(flameGraph);
+
+            console.log("Flame graph rendered/updated.");
+            chartContainer.node().__flamegraphInstance = flameGraph;
+        }
+
+        // Function to display errors (remains the same)
+        function displayError(message) { /* ... */ }
+
+        // Debounced resize handler (remains the same)
+        const handleResize = debounce(() => { /* ... */ }, 250);
+        window.addEventListener('resize', handleResize);
+
+        // Subscribe to data (remains the same)
+        dscc.subscribeToData(drawViz, { transform: dscc.objectTransform });
+
+    </script>
+</body>
+</html>

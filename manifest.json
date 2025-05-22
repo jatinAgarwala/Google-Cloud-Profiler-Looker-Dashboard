@@ -1,0 +1,20 @@
+{
+  "name": "Profiler Flame Graph (Dev)",
+  "logoUrl": "https://url",
+  "organization": "Google Cloud Profiler",
+  "supportUrl": "https://lookerstudio.google.com",
+  "packageUrl": "https://lookerstudio.google.com",
+  "description": "Wrapping the Cloud Profiler Flame Graph in Looker Studio",
+  "devMode": true,
+  "components": [
+    {
+      "name": "Flame Graph",
+      "description": "Flame Graph used to visualize profiles created by Cloud Profiler",
+      "iconUrl": "https://url",
+      "resource": {
+        "content": "<Link to content.html>",
+        "config": "<Link to config.json>"
+      }
+    }
+  ]
+}
